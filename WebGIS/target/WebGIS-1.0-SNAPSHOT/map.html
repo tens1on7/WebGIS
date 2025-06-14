@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WebGIS with GeoServer + 高德地图</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Leaflet 样式与脚本 -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- 高德地图瓦片支持（Leaflet 插件） -->
+  <script src="https://unpkg.com/leaflet.chinatmsproviders/leaflet.ChineseTmsProviders.js"></script>
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    #searchInput {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      padding: 4px;
+      width: 200px;
+    }
+
+    button {
+      position: absolute;
+      top: 10px;
+      left: 220px;
+      z-index: 1000;
+      padding: 4px;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  // 1. 初始化地图
+  const map = L.map('map', {
+    center: [30.54, 114.36], // 武汉大学大致中心
+    zoom: 16
+  });
+  // 动态加载数据库返回的 GeoJSON 建筑图层
+  fetch("/json/building")
+          .then(res => res.json())
+          .then(data => {
+            L.geoJSON(data, {
+              style: { color: "purple" },
+              onEachFeature: function (feature, layer) {
+                if (feature.properties.name) {
+                  layer.bindPopup("建筑名：" + feature.properties.name);
+                }
+              }
+            }).addTo(map);
+          });
+
+  // // 加载本地 GeoJSON 图层
+  // function loadGeoJSONLayer(path, styleOptions = {}, popupField = "name") {
+  //   fetch(path)
+  //           .then(res => res.json())
+  //           .then(data => {
+  //             const layer = L.geoJSON(data, {
+  //               style: styleOptions,
+  //               onEachFeature: function (feature, layer) {
+  //                 if (feature.properties && feature.properties[popupField]) {
+  //                   layer.bindPopup(`${popupField}: ${feature.properties[popupField]}`);
+  //                 }
+  //               }
+  //             });
+  //             layer.addTo(map);
+  //           })
+  //           .catch(err => console.error(`加载 ${path} 出错：`, err));
+  // }
+
+  // // 加载北京、河北、重庆 GeoJSON
+  // loadGeoJSONLayer('data/GeoJSON_BJ.json', { color: "red" }, "name");
+  // loadGeoJSONLayer('data/GeoJSON_HB.json', { color: "blue" }, "name");
+  // loadGeoJSONLayer('data/GeoJSON_Chn.json', { color: "green" }, "name");
+
+  // 2. 添加osm底图（街道图）
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // 3. 添加 GeoServer WMS 图层
+  L.tileLayer.wms("http://localhost:8080/geoserver/whu/wms", {
+    layers: 'whu',
+    format: 'image/png',
+    transparent: true,
+    version: '1.1.0',
+    attribution: "© GeoServer"
+  }).addTo(map);
+
+  fetch("/geojson/building")
+          .then(res => res.json())
+          .then(data => {
+            L.geoJSON(data, {
+              style: { color: "purple" },
+              onEachFeature: function (feature, layer) {
+                if (feature.properties.name) {
+                  layer.bindPopup("建筑名：" + feature.properties.name);
+                }
+              }
+            }).addTo(map);
+          })
+          .catch(err => console.error("加载建筑图层失败:", err));
+
+  let queryLayer = null; // 用于存储查询结果图层
+
+  function searchBuilding() {
+    const keyword = document.getElementById("searchInput").value.trim();
+    if (!keyword) return;
+
+    fetch(`/geojson/building?name=${encodeURIComponent(keyword)}`)
+            .then(res => res.json())
+            .then(data => {
+              if (queryLayer) {
+                map.removeLayer(queryLayer); // 清除旧图层
+              }
+              queryLayer = L.geoJSON(data, {
+                style: { color: "orange" },
+                onEachFeature: function (feature, layer) {
+                  const props = feature.properties;
+                  if (props.name) {
+                    layer.bindPopup("建筑名：" + props.name).openPopup();
+                  }
+                }
+              }).addTo(map);
+
+              // 自动缩放到结果区域
+              if (data.features && data.features.length > 0) {
+                const bounds = queryLayer.getBounds();
+                map.fitBounds(bounds);
+              } else {
+                alert("未找到相关建筑！");
+              }
+            })
+            .catch(err => console.error("查询失败：", err));
+  }
+</script>
+<input type="text" id="searchInput" placeholder="请输入建筑名称">
+<button onclick="searchBuilding()">查询</button>
+</body>
+</html>

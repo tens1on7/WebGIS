@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WebGIS with GeoServer + 高德地图</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Leaflet 样式与脚本 -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- 高德地图瓦片支持（Leaflet 插件） -->
+  <script src="https://unpkg.com/leaflet.chinatmsproviders/leaflet.ChineseTmsProviders.js"></script>
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    #searchInput {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      padding: 4px;
+      width: 200px;
+    }
+
+    #suggestions {
+      position: absolute;
+      top: 38px;
+      left: 10px;
+      z-index: 1000;
+      background: white;
+      border: 1px solid #ccc;
+      width: 200px;
+      max-height: 150px;
+      overflow-y: auto;
+      font-size: 14px;
+    }
+
+    #suggestions div {
+      padding: 4px;
+      cursor: pointer;
+    }
+
+    #suggestions div:hover {
+      background-color: #f0f0f0;
+    }
+
+    #searchBtn {
+      position: absolute;
+      top: 10px;
+      left: 220px;
+      z-index: 1000;
+      padding: 4px;
+    }
+
+    button {
+      position: absolute;
+      top: 10px;
+      left: 220px;
+      z-index: 1000;
+      padding: 4px;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  // 1. 初始化地图
+  const map = L.map('map', {
+    center: [30.54, 114.36], // 武汉大学大致中心
+    zoom: 16
+  });
+  // 动态加载数据库返回的 GeoJSON 建筑图层
+  fetch("/json/building")
+          .then(res => res.json())
+          .then(data => {
+            L.geoJSON(data, {
+              style: { color: "purple" },
+              onEachFeature: function (feature, layer) {
+                if (feature.properties.name) {
+                  layer.bindPopup("建筑名：" + feature.properties.name);
+                }
+              }
+            }).addTo(map);
+          });
+
+  // // 加载本地 GeoJSON 图层
+  // function loadGeoJSONLayer(path, styleOptions = {}, popupField = "name") {
+  //   fetch(path)
+  //           .then(res => res.json())
+  //           .then(data => {
+  //             const layer = L.geoJSON(data, {
+  //               style: styleOptions,
+  //               onEachFeature: function (feature, layer) {
+  //                 if (feature.properties && feature.properties[popupField]) {
+  //                   layer.bindPopup(`${popupField}: ${feature.properties[popupField]}`);
+  //                 }
+  //               }
+  //             });
+  //             layer.addTo(map);
+  //           })
+  //           .catch(err => console.error(`加载 ${path} 出错：`, err));
+  // }
+
+  // // 加载北京、河北、重庆 GeoJSON
+  // loadGeoJSONLayer('data/GeoJSON_BJ.json', { color: "red" }, "name");
+  // loadGeoJSONLayer('data/GeoJSON_HB.json', { color: "blue" }, "name");
+  // loadGeoJSONLayer('data/GeoJSON_Chn.json', { color: "green" }, "name");
+
+  // 2. 添加osm底图（街道图）
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // 3. 添加 GeoServer WMS 图层
+  L.tileLayer.wms("http://localhost:8080/geoserver/whu/wms", {
+    layers: 'whu',
+    format: 'image/png',
+    transparent: true,
+    version: '1.1.0',
+    attribution: "© GeoServer"
+  }).addTo(map);
+
+  let buildingLayer;
+
+  document.getElementById("searchInput").addEventListener("input", function () {
+    const query = this.value;
+    if (query.length < 1) {
+      document.getElementById("suggestions").innerHTML = "";
+      return;
+    }
+
+    fetch(`/geojson/suggest?keyword=${encodeURIComponent(query)}`)
+            .then(res => res.json())
+            .then(data => {
+              const container = document.getElementById("suggestions");
+              container.innerHTML = "";
+              data.forEach(name => {
+                const div = document.createElement("div");
+                div.textContent = name;
+                div.onclick = function () {
+                  document.getElementById("searchInput").value = name;
+                  container.innerHTML = "";
+                  searchBuilding(name);
+                };
+                container.appendChild(div);
+              });
+            });
+  });
+
+  document.getElementById("searchBtn").addEventListener("click", function () {
+    const name = document.getElementById("searchInput").value;
+    searchBuilding(name);
+  });
+
+  function searchBuilding(name) {
+    if (buildingLayer) {
+      map.removeLayer(buildingLayer);
+    }
+
+    fetch(`/geojson/building?name=${encodeURIComponent(name)}`)
+            .then(res => res.json())
+            .then(data => {
+              buildingLayer = L.geoJSON(data, {
+                style: { color: "purple" },
+                onEachFeature: function (feature, layer) {
+                  if (feature.properties.name) {
+                    layer.bindPopup("建筑名：" + feature.properties.name);
+                  }
+                }
+              }).addTo(map);
+              map.fitBounds(buildingLayer.getBounds());
+            });
+  }
+</script>
+<input type="text" id="searchInput" placeholder="请输入建筑名">
+<button id="searchBtn">查询</button>
+<div id="suggestions"></div>
+</body>
+</html>
